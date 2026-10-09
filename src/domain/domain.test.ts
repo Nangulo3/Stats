@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { buildBackup, eventsCsv, parseBackup, summaryCsv } from './backup'
 import {
+  canVoid,
   changeScore,
   closeSet,
+  describeEvent,
+  isActionAvailableFor,
+  setServe,
   countersFor,
   endMatch,
   lastScoreEvent,
@@ -18,12 +22,12 @@ import {
   type Ctx,
 } from './commands'
 import { validateConfig, moveInOrder } from './config'
-import { cloneDefaults, DEFAULT_RULES } from './defaults'
+import { cloneDefaults, DEFAULT_RULES, migrateActions, NO_LIBERO_ACTION_IDS } from './defaults'
 import { rotateClockwise, validateStartingLineup } from './lineup'
 import { createMatch, validateNewMatch, validatePlayer, type NewMatchInput } from './match'
-import { deriveMatchState, setWinnerByRules, suggestions } from './matchState'
+import { defaultNextServe, deriveMatchState, setWinnerByRules, suggestions } from './matchState'
 import { attributionsFor, countByPlayer, playerRows, sortRows, statColumns, teamCounts } from './stats'
-import type { ActionDef, Lineup, Match, MatchEvent, Player, Position } from './types'
+import { BACK_ROW, FRONT_ROW, NON_LIBERO_ROLES, type ActionDef, type Lineup, type Match, type MatchEvent, type Player, type PlayerRole, type Position } from './types'
 
 // ---------- utilidades ----------
 
@@ -272,7 +276,7 @@ describe('marcador', () => {
 
 describe('sets y cierre', () => {
   it('al cerrar un set el siguiente empieza 0–0 y la cancha se mantiene', () => {
-    const g = setup()
+    const g = setup({ liberoId: null })
     g.apply(rotate(g.ctx))
     g.point('us', 25)
     g.point('them', 20)
@@ -357,8 +361,8 @@ describe('líbero', () => {
     expect(g.state.lineup[6]).toBe('p6')
     expect(g.state.liberoPosition).toBeNull()
   })
-  it('advierte si una rotación deja al líbero en fila delantera, sin perder datos', () => {
-    const g = setup()
+  it('con el líbero automático apagado, advierte si una rotación lo deja en la red, sin perder datos', () => {
+    const g = setup({ rules: { ...DEFAULT_RULES, autoLibero: false } })
     g.apply(liberoIn(g.ctx, 5))
     g.stat(5, 'SD')
     g.apply(rotate(g.ctx)) // 5 → 4
@@ -514,5 +518,195 @@ describe('copia de seguridad', () => {
     expect(csv).toContain('Kills')
     const sum = summaryCsv(g.match, g.events, g.config.actions, g.config.categories)
     expect(sum).toContain('EQUIPO')
+  })
+})
+
+// ---------- saque, rotación automática y líbero automático ----------
+
+
+describe('saque y rotación automática', () => {
+  it('sacando: punto nuestro no rota; punto rival nos quita el saque y tampoco rota', () => {
+    const g = setup({ liberoId: null }) // sacamos primero
+    expect(g.state.serving).toBe('us')
+    g.point('us')
+    expect(g.state.lineup).toEqual(lineup)
+    expect(g.state.serving).toBe('us')
+    g.point('them')
+    expect(g.state.lineup).toEqual(lineup)
+    expect(g.state.serving).toBe('them')
+  })
+  it('recibiendo: al hacer punto recuperamos el saque y rotamos una vez', () => {
+    const g = setup({ liberoId: null, firstServe: 'them' })
+    g.point('them') // el rival mantiene el saque
+    expect(g.state.lineup).toEqual(lineup)
+    g.point('us') // side-out
+    expect(g.state.serving).toBe('us')
+    expect(g.state.lineup).toEqual(rotateClockwise(lineup))
+    g.point('us') // seguimos sacando: no rota
+    expect(g.state.lineup).toEqual(rotateClockwise(lineup))
+  })
+  it('“nos hacen un punto y hacemos otro de vuelta” = una rotación', () => {
+    const g = setup({ liberoId: null })
+    g.point('them')
+    g.point('us')
+    expect(g.state.lineup).toEqual(rotateClockwise(lineup))
+    expect(g.state.lineup[1]).toBe('p2') // el de P2 pasa a P1 y saca
+  })
+  it('respeta autoRotate = false', () => {
+    const g = setup({ liberoId: null, firstServe: 'them', rules: { ...DEFAULT_RULES, autoRotate: false } })
+    g.point('us')
+    expect(g.state.lineup).toEqual(lineup)
+    expect(g.state.serving).toBe('us')
+  })
+  it('deshacer el punto deshace también el saque y la rotación', () => {
+    const g = setup({ liberoId: null, firstServe: 'them' })
+    g.point('us')
+    g.undo()
+    expect(g.state.serving).toBe('them')
+    expect(g.state.lineup).toEqual(lineup)
+  })
+  it('corrección manual del saque', () => {
+    const g = setup({ liberoId: null })
+    g.apply(setServe(g.ctx, 'them'))
+    expect(g.state.serving).toBe('them')
+    expect(setServe(g.ctx, 'them').ok).toBe(false)
+    g.point('us')
+    expect(g.state.lineup).toEqual(rotateClockwise(lineup))
+  })
+  it('primer saque por set: alterna y en el decisivo se elige', () => {
+    const g = setup({ liberoId: null, rules: { ...DEFAULT_RULES, bestOf: 3 } })
+    g.point('us', 25)
+    g.apply(closeSet(g.ctx)) // set 1 lo sacamos nosotros → set 2 saca el rival
+    expect(g.state.serving).toBe('them')
+    expect(g.state.sets[1].firstServe).toBe('them')
+    g.point('them', 25)
+    expect(defaultNextServe(g.state)).toBe('us')
+    g.apply(closeSet(g.ctx, 'them')) // sorteo del set decisivo: saca el rival
+    expect(g.state.currentSet).toBe(3)
+    expect(g.state.serving).toBe('them')
+  })
+})
+
+describe('líbero automático', () => {
+  // P4 Dani OP, P3 Caro CE, P2 Bea PU, P5 Eva PU, P6 Fer CE, P1 Ana AR. Líbero #12 entra por Fer (P6).
+  it('sale solo cuando la rotación lo lleva a la red y vuelve el central', () => {
+    const g = setup({ liberoStartPosition: 6, firstServe: 'them' })
+    g.point('us') // rota: líbero 6→5
+    expect(g.state.lineup[5]).toBe('lib')
+    g.point('them')
+    g.point('us') // rota: líbero 5→4 → sale, vuelve Fer en P4
+    const s = g.state
+    expect(s.lineup[4]).toBe('p6')
+    expect(s.liberoPosition).toBeNull()
+    expect(s.liberoFrontRowWarning).toBe(false)
+    expect(Object.values(s.lineup).filter(Boolean)).toHaveLength(6)
+    const ev = g.events[g.events.length - 1]
+    expect(describeEvent(ev, g.match)).toContain('sale líbero, vuelve #6')
+  })
+  it('el otro central saca en P1 y, cuando perdemos el saque, entra el líbero por él', () => {
+    const g = setup({ liberoStartPosition: 6, firstServe: 'them' })
+    g.point('us')
+    g.point('them')
+    g.point('us') // líbero fuera; Caro (CE) llega a P1 y saca
+    expect(g.state.lineup[1]).toBe('p3')
+    expect(g.state.serving).toBe('us')
+    g.point('us') // seguimos sacando: nada cambia
+    expect(g.state.lineup[1]).toBe('p3')
+    g.point('them') // nos hacen punto: entra el líbero por Caro en P1
+    expect(g.state.lineup[1]).toBe('lib')
+    expect(g.state.liberoReplacedId).toBe('p3')
+  })
+  it('simulación de varias vueltas: nunca hay líbero en la red, ni sacando, ni siete en cancha', () => {
+    const g = setup({ liberoStartPosition: 6, firstServe: 'them' })
+    for (let i = 0; i < 24; i++) {
+      g.point('us') // recuperamos el saque y rotamos
+      let s = g.state
+      if (s.liberoPosition) expect(BACK_ROW).toContain(s.liberoPosition)
+      expect(s.lineup[1]).not.toBe('lib') // el líbero nunca saca
+      g.point('them') // perdemos el saque
+      s = g.state
+      if (s.liberoPosition) {
+        expect(BACK_ROW).toContain(s.liberoPosition)
+        expect(['p3', 'p6']).toContain(s.liberoReplacedId) // siempre por un central
+      }
+      const ids = Object.values(s.lineup).filter(Boolean)
+      expect(new Set(ids).size).toBe(6)
+      for (const p of FRONT_ROW) expect(s.lineup[p]).not.toBe('lib')
+    }
+    // tras 24 rotaciones (4 vueltas) el orden base vuelve a ser el inicial
+    const base = { ...g.state.lineup }
+    if (g.state.liberoReplacedId) base[g.state.liberoPosition!] = g.state.liberoReplacedId
+    expect(base).toEqual(lineup)
+  })
+  it('una rotación manual también saca al líbero si llega a la red', () => {
+    const g = setup({ liberoStartPosition: 5 })
+    const ev = g.apply(rotate(g.ctx))
+    expect(ev.liberoOut?.playerId).toBe('p5')
+    expect(g.state.lineup[4]).toBe('p5')
+  })
+  it('deshacer el punto devuelve al líbero', () => {
+    const g = setup({ liberoStartPosition: 6, firstServe: 'them' })
+    g.point('us')
+    g.point('them')
+    g.point('us')
+    g.undo()
+    expect(g.state.lineup[5]).toBe('lib')
+    expect(g.state.liberoReplacedId).toBe('p6')
+  })
+  it('no entra automáticamente si está apagado', () => {
+    const g = setup({ rules: { ...DEFAULT_RULES, autoLibero: false } })
+    g.point('them')
+    expect(g.state.liberoPosition).toBeNull()
+  })
+  it('el líbero no puede sacar desde el inicio', () => {
+    const errors = validateNewMatch(
+      { ourTeam: 'A', opponent: 'B', date: T0, rules: DEFAULT_RULES, firstServe: 'us', lineup, liberoId: 'lib', liberoStartPosition: 1 },
+      players,
+    )
+    expect(errors.join(' ')).toMatch(/no puede sacar/)
+  })
+})
+
+describe('acciones del líbero', () => {
+  it('no puede registrar bloqueos ni Kills, pero sí defensa y recepción', () => {
+    const g = setup({ liberoStartPosition: 6 })
+    const libero = g.match.roster.find((p) => p.id === 'lib')!
+    for (const code of ['SB', 'Blocks', 'BE', 'Kills']) {
+      expect(isActionAvailableFor(g.action(code), libero, g.match)).toBe(false)
+      expect(recordStat(g.ctx, 6, g.action(code), g.config.actions, g.config.categories).ok).toBe(false)
+    }
+    for (const code of ['SD', 'R+', 'Errors']) expect(isActionAvailableFor(g.action(code), libero, g.match)).toBe(true)
+  })
+  it('quien juega de líbero cuenta como líbero aunque su ficha diga otro rol', () => {
+    const g = setup({ liberoStartPosition: 6 })
+    const libAsDE = { ...g.match.roster.find((p) => p.id === 'lib')!, role: 'DE' as const }
+    expect(isActionAvailableFor(g.action('Kills'), libAsDE, g.match)).toBe(false)
+  })
+  it('la migración restringe al líbero y asegura Attempts sin pisar personalizaciones', () => {
+    const old = cloneDefaults().actions.map((a) => ({
+      ...a,
+      eligibleRoles: [] as PlayerRole[],
+      alsoCounts: a.id === 'act-kills' ? [] : a.alsoCounts,
+    }))
+    old.find((a) => a.id === 'act-be')!.eligibleRoles = ['CE'] // personalizado: se respeta
+    const m = migrateActions(old, 1)
+    expect(m.find((a) => a.id === 'act-sb')!.eligibleRoles).toEqual(NON_LIBERO_ROLES)
+    expect(m.find((a) => a.id === 'act-be')!.eligibleRoles).toEqual(['CE'])
+    expect(m.find((a) => a.id === 'act-kills')!.alsoCounts).toContain('act-attempts')
+    expect(m.find((a) => a.id === 'act-errors')!.alsoCounts).toEqual(['act-attempts'])
+    expect(NO_LIBERO_ACTION_IDS).toHaveLength(4)
+    expect(migrateActions(m, 2)).toBe(m)
+  })
+})
+
+describe('anular puntos', () => {
+  it('un punto solo se puede anular si después solo hubo estadísticas', () => {
+    const g = setup({ liberoId: null })
+    g.point('us')
+    const first = g.events[g.events.length - 1]
+    g.stat(4, 'Kills')
+    expect(canVoid(g.events, first)).toBe(true)
+    g.point('them')
+    expect(canVoid(g.events, first)).toBe(false)
   })
 })

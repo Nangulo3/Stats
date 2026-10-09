@@ -9,6 +9,8 @@ export const FRONT_ROW: readonly Position[] = [4, 3, 2]
 export const BACK_ROW: readonly Position[] = [5, 6, 1]
 
 export type PlayerRole = 'PU' | 'OP' | 'CE' | 'AR' | 'LI' | 'DE'
+/** Todos los roles salvo líbero: para acciones que el líbero no puede hacer (bloqueo, remate). */
+export const NON_LIBERO_ROLES: PlayerRole[] = ['PU', 'OP', 'CE', 'AR', 'DE']
 
 export const ROLE_LABELS: Record<PlayerRole, string> = {
   PU: 'Punta',
@@ -86,6 +88,10 @@ export interface MatchRules {
   pointsPerSet: number
   decidingSetPoints: number
   winByTwo: boolean
+  /** Rotar automáticamente al recuperar el saque. undefined = sí (partidos antiguos). */
+  autoRotate?: boolean
+  /** Entrada/salida automática del líbero. undefined = sí. */
+  autoLibero?: boolean
 }
 
 export type MatchStatus = 'live' | 'finished'
@@ -130,12 +136,33 @@ export interface StatEvent extends BaseEvent {
   counters: ID[]
 }
 
+/** Cambio de líbero aplicado automáticamente como consecuencia de un punto o rotación. */
+export interface LiberoMove {
+  position: Position
+  liberoId: ID
+  /** Jugador de campo que sale (in) o que vuelve (out). */
+  playerId: ID
+}
+
+export interface AutoEffects {
+  rotated: boolean
+  liberoOut: LiberoMove | null
+  liberoIn: LiberoMove | null
+  lineupBefore: Lineup
+  lineupAfter: Lineup
+}
+
 export interface ScoreEvent extends BaseEvent {
   type: 'score'
   team: Team
   delta: 1 | -1
   before: Score
   after: Score
+  /** Quién sacaba antes y quién saca después del punto (ausente en datos antiguos). */
+  servingBefore?: Team
+  servingAfter?: Team
+  /** Efectos automáticos fijados al registrar el punto. */
+  auto?: AutoEffects | null
 }
 
 export interface SubstitutionEvent extends BaseEvent {
@@ -162,11 +189,21 @@ export interface RotationEvent extends BaseEvent {
   type: 'rotation'
   lineupBefore: Lineup
   lineupAfter: Lineup
+  /** Si la rotación llevó al líbero a la red y salió automáticamente. */
+  liberoOut?: LiberoMove | null
+}
+
+/** Corrección manual de qué equipo tiene el saque. */
+export interface ServeEvent extends BaseEvent {
+  type: 'serve'
+  team: Team
 }
 
 export interface SetCloseEvent extends BaseEvent {
   type: 'set_close'
   winner: Team
+  /** Quién saca primero en el set siguiente. */
+  nextServe?: Team
 }
 
 export interface MatchEndEvent extends BaseEvent {
@@ -179,6 +216,7 @@ export type MatchEvent =
   | SubstitutionEvent
   | LiberoEvent
   | RotationEvent
+  | ServeEvent
   | SetCloseEvent
   | MatchEndEvent
 
@@ -190,6 +228,7 @@ export const EVENT_TYPE_LABELS: Record<EventType, string> = {
   substitution: 'Sustitución',
   libero: 'Líbero',
   rotation: 'Rotación',
+  serve: 'Saque',
   set_close: 'Cierre de set',
   match_end: 'Fin del partido',
 }

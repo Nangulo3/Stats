@@ -63,9 +63,16 @@ src/
 - **Instantáneas.** Cada evento guarda el marcador del instante, el set, la hora y la posición. También guarda una copia del jugador (número, nombre y rol) y de la acción (código, nombre, categoría y color). Así, editar un jugador o renombrar una acción no altera el historial.
 - **Reglas de conteo configurables y fijadas al registrar.** Por defecto, Kills y Errors suman también Attempts, y SB y BE suman también Blocks. Los contadores aplicados quedan guardados en el evento, así que cambiar la regla después no reescribe partidos anteriores.
 - **Marcador independiente.** Ninguna estadística suma puntos; el +1 es siempre manual.
-- **Rotación manual.** El mapeo es 4→3, 3→2, 2→1, 1→6, 6→5, 5→4.
+- **Saque y rotación automáticos** (se pueden apagar al crear el partido).
+  - El equipo que gana el rally saca. Solo rotamos (4→3, 3→2, 2→1, 1→6, 6→5, 5→4) cuando recuperamos el saque.
+  - Primer saque: el set 1 se elige al crear el partido; en los siguientes saca primero quien no sacó primero en el anterior; antes del set decisivo la app pregunta (nuevo sorteo).
+  - Cada punto guarda quién sacaba antes y después y sus efectos automáticos; deshacer el punto los revierte.
+  - Un punto solo se puede anular si después de él solo hubo estadísticas.
+  - "Rotar" y "Corregir saque" (menu ⋯) quedan para corregir a mano.
 - **Líbero.**
   - Usa una operación propia, distinta de la sustitución normal.
+  - Automático: cuando una rotación lo lleva a la red (P4) sale y vuelve el jugador al que reemplazaba; cuando perdemos el saque entra por el central (CE) que esté en zaga, empezando por P1.
+  - No ve SB, Blocks, BE ni Kills (no puede bloquear ni rematar por encima de la red). Quien juega de líbero en el partido cuenta como líbero aunque su ficha tenga otro rol.
   - Solo entra en zaga y nunca aparece un séptimo círculo.
   - Al salir vuelve el jugador al que reemplazó.
   - Si una rotación lo deja en fila delantera, la app avisa sin bloquear ni perder datos.

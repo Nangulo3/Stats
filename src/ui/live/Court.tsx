@@ -8,12 +8,15 @@ export function Court({
   roster,
   liberoId,
   selected,
+  serving = false,
   onTap,
 }: {
   lineup: Lineup
   roster: Map<ID, PlayerSnapshot>
   liberoId: ID | null
   selected: Position | null
+  /** Sacamos nosotros: se marca al jugador de P1. */
+  serving?: boolean
   onTap: (pos: Position) => void
 }) {
   return (
@@ -39,7 +42,9 @@ export function Court({
                 <span className="num">{p ? p.number : '—'}</span>
                 <span className="role">{p ? p.role : ''}</span>
               </button>
-              <span className="pos">P{pos}</span>
+              <span className="pos">
+                {serving && pos === 1 ? '🏐 saca · ' : ''}P{pos}
+              </span>
             </div>
           )
         })}

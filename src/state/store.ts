@@ -5,13 +5,14 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 import { buildBackup, type AppData, type BackupFile } from '../domain/backup'
 import {
+  canVoid,
   lastScoreEvent,
   lastUndoable,
   voidEvent,
   type CommandResult,
   type Ctx,
 } from '../domain/commands'
-import { cloneDefaults } from '../domain/defaults'
+import { cloneDefaults, CONFIG_VERSION, migrateActions } from '../domain/defaults'
 import { newId, nowIso } from '../domain/ids'
 import { createMatch as domainCreateMatch, type NewMatchInput, type PlayerDraft } from '../domain/match'
 import { deriveMatchState } from '../domain/matchState'
@@ -49,7 +50,7 @@ interface State {
   createMatch(input: NewMatchInput): Promise<ID>
   run<E extends MatchEvent>(matchId: ID, cmd: (ctx: Ctx) => CommandResult<E>): Promise<E | null>
   undoLast(matchId: ID): Promise<void>
-  undoLastPoint(matchId: ID): Promise<void>
+  undoLastPoint(matchId: ID, team?: Team): Promise<void>
   voidEventById(matchId: ID, eventId: ID): Promise<void>
 
   saveCategory(c: ActionCategory): Promise<void>
@@ -65,19 +66,7 @@ interface State {
 
 let toastSeq = 0
 
-/**
- * Estadísticas se pueden anular en cualquier momento (no afectan a la cancha ni al marcador);
- * puntos, mientras su set siga abierto. Sustituciones, líbero, rotaciones y cierres solo si
- * son lo último, para no dejar la cancha o los sets en un estado incoherente.
- */
-export function canVoid(events: MatchEvent[], e: MatchEvent): boolean {
-  if (e.voided) return false
-  if (lastUndoable(events)?.id === e.id) return true
-  if (e.type === 'stat') return true
-  if (e.type === 'score')
-    return !events.some((x) => !x.voided && x.type === 'set_close' && x.setNumber === e.setNumber)
-  return false
-}
+export { canVoid }
 
 export const useStore = create<State>()((set, get) => {
   /** Ejecuta una escritura, contando las pendientes para avisar al cerrar la página. */
@@ -139,6 +128,9 @@ export const useStore = create<State>()((set, get) => {
           const d = cloneDefaults()
           categories = d.categories
           actions = d.actions
+          await db.replaceConfig(categories, actions)
+        } else if (data.configVersion < CONFIG_VERSION) {
+          actions = migrateActions(actions, data.configVersion)
           await db.replaceConfig(categories, actions)
         }
         set({ ...data, categories, actions, loaded: true })
@@ -224,13 +216,20 @@ export const useStore = create<State>()((set, get) => {
       await get().voidEventById(matchId, last.id)
     },
 
-    async undoLastPoint(matchId) {
+    async undoLastPoint(matchId, team) {
       const match = matchById(matchId)
       const events = matchEvents(matchId)
       const state = deriveMatchState(match, events)
-      const last = lastScoreEvent(events, state.currentSet)
+      const last = lastScoreEvent(events, state.currentSet, team)
       if (!last) {
         get().showToast({ kind: 'error', message: 'No hay puntos que corregir en este set.' })
+        return
+      }
+      if (!canVoid(events, last)) {
+        get().showToast({
+          kind: 'error',
+          message: 'Ese punto ya no es lo último que pasó (hubo otro punto o cambio después). Usa Deshacer.',
+        })
         return
       }
       await get().voidEventById(matchId, last.id)
@@ -307,7 +306,7 @@ export const useStore = create<State>()((set, get) => {
       const clean: AppData = {
         players: data.players,
         categories: data.categories,
-        actions: data.actions,
+        actions: migrateActions(data.actions, (data as Partial<BackupFile>).configVersion ?? 1),
         matches: data.matches,
         events: data.events,
       }

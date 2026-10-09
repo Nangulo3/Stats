@@ -48,6 +48,8 @@ export function eventTag(e: MatchEvent): { text: string; color?: string } {
       return { text: 'L' }
     case 'rotation':
       return { text: '↻' }
+    case 'serve':
+      return { text: 'SAQ' }
     case 'set_close':
       return { text: 'SET' }
     case 'match_end':

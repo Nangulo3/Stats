@@ -34,6 +34,8 @@ export function validateNewMatch(input: NewMatchInput, players: Player[]): strin
     if (!input.liberoId) errors.push('Elige un líbero para que entre desde el inicio.')
     else if (!isBackRow(input.liberoStartPosition))
       errors.push('El líbero solo puede entrar en una posición zaguera (5, 6 o 1).')
+    else if (input.liberoStartPosition === 1 && input.firstServe === 'us')
+      errors.push('El líbero no puede sacar: si sacamos primero, no lo pongas en P1.')
   }
   return errors
 }

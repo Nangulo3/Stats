@@ -2,6 +2,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { AppData } from '../domain/backup'
+import { CONFIG_VERSION } from '../domain/defaults'
 import type { ActionCategory, ActionDef, Match, MatchEvent, Player } from '../domain/types'
 
 const DB_NAME = 'volei-match-tracker'
@@ -40,17 +41,27 @@ export function getDb(): Promise<IDBPDatabase<VoleiDB>> {
   return dbPromise
 }
 
-export async function loadAll(): Promise<AppData & { seeded: boolean }> {
+export async function loadAll(): Promise<AppData & { seeded: boolean; configVersion: number }> {
   const db = await getDb()
-  const [players, categories, actions, matches, events, seeded] = await Promise.all([
+  const [players, categories, actions, matches, events, seeded, configVersion] = await Promise.all([
     db.getAll('players'),
     db.getAll('categories'),
     db.getAll('actions'),
     db.getAll('matches'),
     db.getAll('events'),
     db.get('meta', 'seeded'),
+    db.get('meta', 'configVersion'),
   ])
-  return { players, categories, actions, matches, events, seeded: Boolean(seeded?.value) }
+  return {
+    players,
+    categories,
+    actions,
+    matches,
+    events,
+    seeded: Boolean(seeded?.value),
+    // Antes de existir este campo la configuración era la versión 1.
+    configVersion: typeof configVersion?.value === 'number' ? configVersion.value : 1,
+  }
 }
 
 export async function putPlayer(p: Player) {
@@ -83,6 +94,7 @@ export async function replaceConfig(categories: ActionCategory[], actions: Actio
     ...categories.map((c) => cs.put(c)),
     ...actions.map((a) => as.put(a)),
     tx.objectStore('meta').put({ key: 'seeded', value: true }),
+    tx.objectStore('meta').put({ key: 'configVersion', value: CONFIG_VERSION }),
     tx.done,
   ])
 }
@@ -100,6 +112,7 @@ export async function replaceAll(data: AppData) {
     ...data.matches.map((x) => tx.objectStore('matches').put(x)),
     ...data.events.map((x) => tx.objectStore('events').put(x)),
     tx.objectStore('meta').put({ key: 'seeded', value: true }),
+    tx.objectStore('meta').put({ key: 'configVersion', value: CONFIG_VERSION }),
     tx.done,
   ])
 }

@@ -178,8 +178,24 @@ export function MatchSetup() {
             <input type="checkbox" checked={rules.winByTwo} onChange={(e) => setRules({ ...rules, winByTwo: e.target.checked })} />
             Diferencia de dos puntos para ganar el set
           </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={rules.autoRotate !== false}
+              onChange={(e) => setRules({ ...rules, autoRotate: e.target.checked })}
+            />
+            Rotar automáticamente al recuperar el saque
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={rules.autoLibero !== false}
+              onChange={(e) => setRules({ ...rules, autoLibero: e.target.checked })}
+            />
+            Líbero automático (sale al llegar a la red, entra por el central al perder el saque)
+          </label>
           <div className="field">
-            <span className="label">Saque inicial</span>
+            <span className="label">Saque inicial (set 1)</span>
             <div className="seg">
               <button type="button" aria-pressed={firstServe === 'us'} onClick={() => setFirstServe('us')}>
                 {ourTeam.trim() || 'Nosotros'}

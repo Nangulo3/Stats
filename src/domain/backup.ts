@@ -1,6 +1,7 @@
 // Copia de seguridad JSON (con versión de esquema) y exportación CSV.
 
 import { describeEvent } from './commands'
+import { CONFIG_VERSION } from './defaults'
 import { deriveMatchState } from './matchState'
 import { formatEfficiency, playerRows, statColumns, teamCounts } from './stats'
 import type { ActionCategory, ActionDef, Match, MatchEvent, Player } from './types'
@@ -19,11 +20,13 @@ export interface AppData {
 export interface BackupFile extends AppData {
   app: typeof APP_ID
   schemaVersion: number
+  /** Versión de la configuración de acciones (para migrarla al importar). */
+  configVersion?: number
   exportedAt: string
 }
 
 export function buildBackup(data: AppData, now = new Date().toISOString()): BackupFile {
-  return { app: APP_ID, schemaVersion: SCHEMA_VERSION, exportedAt: now, ...data }
+  return { app: APP_ID, schemaVersion: SCHEMA_VERSION, configVersion: CONFIG_VERSION, exportedAt: now, ...data }
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -62,7 +65,7 @@ function checkMatch(m: unknown): boolean {
     (m.status === 'live' || m.status === 'finished')
   )
 }
-const EVENT_TYPES = new Set(['stat', 'score', 'substitution', 'libero', 'rotation', 'set_close', 'match_end'])
+const EVENT_TYPES = new Set(['stat', 'score', 'substitution', 'libero', 'rotation', 'serve', 'set_close', 'match_end'])
 function checkEvent(e: unknown): boolean {
   return (
     isObj(e) &&

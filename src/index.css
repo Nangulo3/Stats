@@ -476,6 +476,17 @@ textarea.input {
   font-weight: 600;
   color: var(--ink-2);
 }
+.score-side.serving {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px var(--focus), var(--shadow);
+}
+.serve-line {
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
 .sets-strip {
   display: flex;
   gap: 6px;
@@ -551,6 +562,8 @@ textarea.input {
 }
 .court-label.back {
   bottom: 4px;
+  right: auto;
+  left: 8px;
 }
 .slot {
   display: flex;

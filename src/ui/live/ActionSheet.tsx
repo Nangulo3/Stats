@@ -29,11 +29,11 @@ export function ActionSheet({
       .map((c) => ({
         cat: c,
         items: actions
-          .filter((a) => a.categoryId === c.id && isActionAvailableFor(a, player))
+          .filter((a) => a.categoryId === c.id && isActionAvailableFor(a, player, match))
           .sort((a, b) => a.order - b.order),
       }))
       .filter((g) => g.items.length > 0)
-  }, [actions, categories, player])
+  }, [actions, categories, player, match])
 
   async function tap(a: ActionDef) {
     if (a.confirm && armed !== a.id) {
@@ -58,7 +58,7 @@ export function ActionSheet({
         <>
           #{player.number} {player.name}
           <span className="muted small" style={{ display: 'block', fontWeight: 500 }}>
-            {ROLE_LABELS[player.role]} · posición {position}
+            {player.id === match.liberoId ? 'Líbero' : ROLE_LABELS[player.role]} · posición {position}
           </span>
         </>
       }

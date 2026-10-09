@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { changeScore, closeSet, endMatch, lastUndoable, rotate, undoLabel } from '../../domain/commands'
-import { deriveMatchState, suggestions, validEvents } from '../../domain/matchState'
+import { changeScore, closeSet, describeEvent, endMatch, lastUndoable, rotate, setServe, undoLabel } from '../../domain/commands'
+import { autoRotateOn, defaultNextServe, deriveMatchState, other, suggestions, validEvents } from '../../domain/matchState'
 import type { ID, Match, PlayerSnapshot, Position, Team } from '../../domain/types'
 import { useMatchEvents, useStore } from '../../state/store'
 import { Sheet, TopBar } from '../components'
@@ -10,7 +10,13 @@ import { EventRow } from './EventRow'
 import { Court } from './Court'
 import { LiberoSheet, SubstitutionSheet } from './SubstitutionSheet'
 
-type Panel = { kind: 'action'; pos: Position } | { kind: 'sub' } | { kind: 'libero' } | { kind: 'menu' } | null
+type Panel =
+  | { kind: 'action'; pos: Position }
+  | { kind: 'sub' }
+  | { kind: 'libero' }
+  | { kind: 'menu' }
+  | { kind: 'decidingServe' }
+  | null
 
 export function LiveMatch({ matchId }: { matchId: ID }) {
   const match = useStore((s) => s.matches.find((m) => m.id === matchId))
@@ -46,18 +52,44 @@ function LiveMatchInner({ match }: { match: Match }) {
   const onCourt = new Set(Object.values(state.lineup))
   const bench = match.roster.filter((p) => !onCourt.has(p.id)).sort((a, b) => a.number - b.number)
 
-  const point = (team: Team, delta: 1 | -1) => run(match.id, (ctx) => changeScore(ctx, team, delta))
+  const teamName = (t: Team) => (t === 'us' ? match.ourTeam : match.opponent)
+
+  async function point(team: Team) {
+    const ev = await run(match.id, (ctx) => changeScore(ctx, team, 1))
+    // Si el punto movió la cancha (rotación o líbero), avisarlo con opción de deshacer.
+    if (ev?.auto)
+      showToast({ kind: 'info', message: describeEvent(ev, match), undoEventId: ev.id, matchId: match.id })
+  }
 
   async function doRotate() {
     const ev = await run(match.id, rotate)
-    if (ev) showToast({ kind: 'info', message: 'Rotación aplicada', undoEventId: ev.id, matchId: match.id })
+    if (ev) showToast({ kind: 'info', message: describeEvent(ev, match), undoEventId: ev.id, matchId: match.id })
   }
 
-  async function doCloseSet() {
-    const n = state.currentSet
-    const ev = await run(match.id, closeSet)
-    if (ev) showToast({ kind: 'info', message: `Set ${n} cerrado`, undoEventId: ev.id, matchId: match.id })
+  /** Antes del set decisivo hay nuevo sorteo: se pregunta quién saca. */
+  function requestCloseSet() {
+    if (sug.nextIsDeciding) setPanel({ kind: 'decidingServe' })
+    else void doCloseSet()
   }
+
+  async function doCloseSet(nextServe?: Team) {
+    const n = state.currentSet
+    const ev = await run(match.id, (ctx) => closeSet(ctx, nextServe))
+    if (ev)
+      showToast({
+        kind: 'info',
+        message: `Set ${n} cerrado · saca primero ${teamName(ev.nextServe ?? defaultNextServe(state))}`,
+        undoEventId: ev.id,
+        matchId: match.id,
+      })
+  }
+
+  async function toggleServe() {
+    const ev = await run(match.id, (ctx) => setServe(ctx, other(state.serving)))
+    if (ev) showToast({ kind: 'info', message: `Saque para ${teamName(ev.team)}`, undoEventId: ev.id, matchId: match.id })
+  }
+
+  const server = state.serving === 'us' ? roster.get(state.lineup[1] ?? '') : undefined
 
   async function doEnd() {
     const ev = await run(match.id, endMatch)
@@ -82,9 +114,30 @@ function LiveMatchInner({ match }: { match: Match }) {
 
       <div className="page" style={{ gap: 10, paddingBottom: 12 }}>
         <div className="scoreboard">
-          <ScoreSide side="us" name={match.ourTeam} pts={state.score.us} sets={state.setsWon.us} onPlus={() => point('us', 1)} onMinus={() => point('us', -1)} />
-          <ScoreSide side="them" name={match.opponent} pts={state.score.them} sets={state.setsWon.them} onPlus={() => point('them', 1)} onMinus={() => point('them', -1)} />
+          {(['us', 'them'] as Team[]).map((t) => (
+            <ScoreSide
+              key={t}
+              side={t}
+              name={teamName(t)}
+              pts={state.score[t]}
+              sets={state.setsWon[t]}
+              serving={state.serving === t}
+              onPlus={() => void point(t)}
+              onMinus={() => void undoLastPoint(match.id, t)}
+            />
+          ))}
         </div>
+        {!state.finished && (
+          <div className="serve-line" role="status">
+            🏐 Saca <strong>{teamName(state.serving)}</strong>
+            {server && (
+              <>
+                {' '}· #{server.number} {server.name} (P1)
+              </>
+            )}
+            {state.serving === 'them' && autoRotateOn(match.rules) && <span className="muted"> · si hacemos punto, rotamos</span>}
+          </div>
+        )}
 
         {state.sets.length > 1 && (
           <div className="sets-strip" aria-label="Resultados por set">
@@ -118,7 +171,7 @@ function LiveMatchInner({ match }: { match: Match }) {
             <span className="grow">
               Set {state.currentSet} para {sug.closeSet === 'us' ? match.ourTeam : match.opponent} ({state.score.us}–{state.score.them}). ¿Cerrar?
             </span>
-            <button className="btn primary small" onClick={() => void doCloseSet()}>
+            <button className="btn primary small" onClick={requestCloseSet}>
               Cerrar set
             </button>
           </div>
@@ -137,6 +190,7 @@ function LiveMatchInner({ match }: { match: Match }) {
           roster={roster}
           liberoId={match.liberoId}
           selected={selectedPos}
+          serving={state.serving === 'us' && !state.finished}
           onTap={(pos) => setPanel({ kind: 'action', pos })}
         />
 
@@ -197,8 +251,19 @@ function LiveMatchInner({ match }: { match: Match }) {
               ☰ Historial completo
             </a>
             <button className="btn block" onClick={() => void undoLastPoint(match.id).then(() => setPanel(null))}>
-              ↶ Deshacer último cambio de marcador
+              ↶ Deshacer último punto
             </button>
+            {!state.finished && (
+              <button
+                className="btn block"
+                onClick={() => {
+                  setPanel(null)
+                  void toggleServe()
+                }}
+              >
+                🏐 Corregir saque: dárselo a {teamName(other(state.serving))}
+              </button>
+            )}
             {!state.finished && (
               <button
                 className="btn block"
@@ -206,7 +271,7 @@ function LiveMatchInner({ match }: { match: Match }) {
                 onClick={() => {
                   if (confirm(`¿Cerrar el set ${state.currentSet} con ${state.score.us}–${state.score.them}?`)) {
                     setPanel(null)
-                    void doCloseSet()
+                    requestCloseSet()
                   }
                 }}
               >
@@ -232,6 +297,27 @@ function LiveMatchInner({ match }: { match: Match }) {
           </div>
         </Sheet>
       )}
+      {panel?.kind === 'decidingServe' && (
+        <Sheet title={`Set decisivo (${state.currentSet + 1}º): sorteo`} onClose={() => setPanel(null)}>
+          <div className="stack">
+            <p className="muted" style={{ margin: 0 }}>
+              Se cierra el set {state.currentSet} ({state.score.us}–{state.score.them}). ¿Quién saca primero en el set decisivo?
+            </p>
+            {(['us', 'them'] as Team[]).map((t) => (
+              <button
+                key={t}
+                className="btn big block"
+                onClick={() => {
+                  setPanel(null)
+                  void doCloseSet(t)
+                }}
+              >
+                🏐 {teamName(t)}
+              </button>
+            ))}
+          </div>
+        </Sheet>
+      )}
     </>
   )
 }
@@ -241,6 +327,7 @@ function ScoreSide({
   name,
   pts,
   sets,
+  serving,
   onPlus,
   onMinus,
 }: {
@@ -248,13 +335,17 @@ function ScoreSide({
   name: string
   pts: number
   sets: number
+  serving: boolean
   onPlus: () => void
   onMinus: () => void
 }) {
   return (
-    <div className={`score-side ${side}`}>
+    <div className={`score-side ${side} ${serving ? 'serving' : ''}`}>
       <div className="team">
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {serving && <span aria-label="tiene el saque">🏐 </span>}
+          {name}
+        </span>
         <span className="badge">{sets} sets</span>
       </div>
       <div className="pts" aria-live="polite" aria-label={`${name}: ${pts} puntos`}>
@@ -263,8 +354,8 @@ function ScoreSide({
       <button className="plus" aria-label={`Sumar punto a ${name}`} onClick={onPlus}>
         +1
       </button>
-      <button className="minus" aria-label={`Restar punto a ${name}`} onClick={onMinus} disabled={pts === 0}>
-        −1 corregir
+      <button className="minus" aria-label={`Anular último punto de ${name}`} onClick={onMinus} disabled={pts === 0}>
+        ↶ anular último punto
       </button>
     </div>
   )
