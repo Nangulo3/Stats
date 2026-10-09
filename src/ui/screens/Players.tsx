@@ -3,6 +3,7 @@ import { validatePlayer, type PlayerDraft, type PlayerErrors } from '../../domai
 import { ROLE_LABELS, type Player, type PlayerRole } from '../../domain/types'
 import { useStore } from '../../state/store'
 import { Field, Sheet, TopBar } from '../components'
+import { DemoRosterButton } from '../DemoRosterButton'
 
 const ROLES = Object.keys(ROLE_LABELS) as PlayerRole[]
 
@@ -44,8 +45,11 @@ export function Players() {
             <button className="btn primary" onClick={() => setEditing('new')}>
               ＋ Crear el primer jugador
             </button>
+            <DemoRosterButton />
           </div>
         ) : (
+          <>
+          <DemoRosterButton className="btn small block" />
           <div className="list">
             {sorted.map((p) => (
               <button key={p.id} className="list-item" onClick={() => setEditing(p)}>
@@ -60,6 +64,7 @@ export function Players() {
               </button>
             ))}
           </div>
+          </>
         )}
       </div>
       {editing && <PlayerEditor player={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}

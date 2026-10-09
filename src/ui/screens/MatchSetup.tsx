@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { DEFAULT_RULES } from '../../domain/defaults'
 import { emptyLineup } from '../../domain/lineup'
-import { validateNewMatch, type NewMatchInput } from '../../domain/match'
+import { suggestLineup, validateNewMatch, type NewMatchInput } from '../../domain/match'
 import { BACK_ROW, type ID, type Lineup, type Position } from '../../domain/types'
 import { useStore } from '../../state/store'
 import { Field, TopBar } from '../components'
+import { DemoRosterButton } from '../DemoRosterButton'
 import { navigate, routes } from '../router'
 
 function localInputValue(d: Date) {
@@ -17,6 +18,7 @@ const LAST_TEAM_KEY = 'volei.lastTeamName'
 export function MatchSetup() {
   const players = useStore((s) => s.players)
   const createMatch = useStore((s) => s.createMatch)
+  const showToast = useStore((s) => s.showToast)
   const active = useMemo(() => players.filter((p) => p.active).sort((a, b) => a.number - b.number), [players])
 
   const [ourTeam, setOurTeam] = useState(() => {
@@ -46,6 +48,17 @@ export function MatchSetup() {
     next[pos] = id || null
     setLineup(next)
     if (id && id === liberoId) setLiberoId('')
+  }
+
+  function applySuggestion() {
+    const sug = suggestLineup(players)
+    if (!sug) {
+      showToast({ kind: 'error', message: 'Para la 5-1 se necesitan 1 armador, 2 puntas, 2 centrales y 1 opuesto activos.' })
+      return
+    }
+    setLineup(sug.lineup)
+    setLiberoId(sug.liberoId ?? '')
+    setLiberoStart(sug.liberoStart ?? '')
   }
 
   async function start() {
@@ -87,6 +100,7 @@ export function MatchSetup() {
             <a className="btn primary" href={'#' + routes.players()}>
               Ir a Jugadores
             </a>
+            <DemoRosterButton />
           </div>
         </div>
       </>
@@ -208,7 +222,14 @@ export function MatchSetup() {
         </section>
 
         <section className="card stack">
-          <h2>Titulares</h2>
+          <div className="row">
+            <h2 className="grow" style={{ margin: 0 }}>
+              Titulares
+            </h2>
+            <button className="btn small" onClick={applySuggestion}>
+              ⚡ Sugerida 5-1
+            </button>
+          </div>
           <p className="muted small" style={{ margin: 0 }}>
             Asigna un jugador a cada posición. La red está arriba.
           </p>

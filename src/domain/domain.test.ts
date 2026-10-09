@@ -24,7 +24,7 @@ import {
 import { validateConfig, moveInOrder } from './config'
 import { cloneDefaults, DEFAULT_RULES, migrateActions, NO_LIBERO_ACTION_IDS } from './defaults'
 import { rotateClockwise, validateStartingLineup } from './lineup'
-import { createMatch, validateNewMatch, validatePlayer, type NewMatchInput } from './match'
+import { createMatch, DEMO_ROSTER, missingDemoPlayers, suggestLineup, validateNewMatch, validatePlayer, type NewMatchInput } from './match'
 import { defaultNextServe, deriveMatchState, setWinnerByRules, suggestions } from './matchState'
 import { attributionsFor, countByPlayer, playerRows, sortRows, statColumns, teamCounts } from './stats'
 import { BACK_ROW, FRONT_ROW, NON_LIBERO_ROLES, type ActionDef, type Lineup, type Match, type MatchEvent, type Player, type PlayerRole, type Position } from './types'
@@ -708,5 +708,25 @@ describe('anular puntos', () => {
     expect(canVoid(g.events, first)).toBe(true)
     g.point('them')
     expect(canVoid(g.events, first)).toBe(false)
+  })
+})
+
+describe('plantilla de prueba y alineación sugerida', () => {
+  it('crea 2 PU, 1 OP, 1 AR, 2 CE y 1 LI sin repetir números activos', () => {
+    const all = missingDemoPlayers([])
+    expect(all).toHaveLength(7)
+    const count = (r: string) => all.filter((d) => d.role === r).length
+    expect([count('PU'), count('OP'), count('AR'), count('CE'), count('LI')]).toEqual([2, 1, 1, 2, 1])
+    expect(missingDemoPlayers(players).map((d) => d.number)).toEqual([]) // 1–6 y 12 ya existen
+  })
+  it('sugiere la 5-1: AR en P1, PU en P2/P5, CE en P3/P6, OP en P4 y líbero por el central de P6', () => {
+    const demo: Player[] = DEMO_ROSTER.map((d, i) => mkPlayer(`d${i}`, d.number, d.role))
+    const sug = suggestLineup(demo)!
+    const role = (pos: Position) => demo.find((p) => p.id === sug.lineup[pos])!.role
+    expect([1, 2, 3, 4, 5, 6].map((p) => role(p as Position))).toEqual(['AR', 'PU', 'CE', 'OP', 'PU', 'CE'])
+    expect(sug.liberoStart).toBe(6)
+    expect(demo.find((p) => p.id === sug.liberoId)!.role).toBe('LI')
+    expect(validateNewMatch({ ourTeam: 'A', opponent: 'B', date: T0, rules: DEFAULT_RULES, firstServe: 'us', lineup: sug.lineup, liberoId: sug.liberoId, liberoStartPosition: sug.liberoStart }, demo)).toEqual([])
+    expect(suggestLineup(demo.filter((p) => p.role !== 'OP'))).toBeNull()
   })
 })

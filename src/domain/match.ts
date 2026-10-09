@@ -1,6 +1,6 @@
 import { validateStartingLineup, isBackRow } from './lineup'
 import { newId, nowIso } from './ids'
-import type { ID, Lineup, Match, MatchEvent, MatchRules, Player, PlayerSnapshot, Position, Team } from './types'
+import type { ID, Lineup, Match, MatchEvent, MatchRules, Player, PlayerRole, PlayerSnapshot, Position, Team } from './types'
 
 export interface NewMatchInput {
   ourTeam: string
@@ -113,4 +113,48 @@ export function validatePlayer(draft: PlayerDraft, others: Player[], editingId?:
   else if (draft.name.trim().length > 40) errors.name = 'Máximo 40 caracteres.'
   if (!draft.role) errors.role = 'Elige la posición habitual.'
   return errors
+}
+
+// ---------- Plantilla de prueba y alineación sugerida ----------
+
+/** Plantilla fija de 7 jugadores para probar rápido: 2 puntas, 1 opuesto, 1 armador, 2 centrales y 1 líbero. */
+export const DEMO_ROSTER: { number: number; name: string; role: PlayerRole }[] = [
+  { number: 1, name: 'Armador', role: 'AR' },
+  { number: 2, name: 'Punta 1', role: 'PU' },
+  { number: 3, name: 'Central 1', role: 'CE' },
+  { number: 4, name: 'Opuesto', role: 'OP' },
+  { number: 5, name: 'Punta 2', role: 'PU' },
+  { number: 6, name: 'Central 2', role: 'CE' },
+  { number: 12, name: 'Líbero', role: 'LI' },
+]
+
+/** Jugadores de la plantilla de prueba que faltan (no se duplican números de jugadores activos). */
+export function missingDemoPlayers(existing: Player[]): PlayerDraft[] {
+  const used = new Set(existing.filter((p) => p.active).map((p) => p.number))
+  return DEMO_ROSTER.filter((d) => !used.has(d.number)).map((d) => ({
+    number: String(d.number),
+    name: d.name,
+    role: d.role,
+  }))
+}
+
+/**
+ * Alineación 5-1 clásica según la posición habitual:
+ * armador P1, puntas P2 y P5, central P3 y P6, opuesto P4. El líbero entra por el central de P6.
+ * Devuelve null si no hay suficientes jugadores de cada rol.
+ */
+export function suggestLineup(players: Player[]): { lineup: Lineup; liberoId: ID | null; liberoStart: Position | null } | null {
+  const active = [...players].filter((p) => p.active).sort((a, b) => a.number - b.number)
+  const take = (role: PlayerRole, n: number) => active.filter((p) => p.role === role).slice(0, n)
+  const [ar] = take('AR', 1)
+  const pu = take('PU', 2)
+  const ce = take('CE', 2)
+  const [op] = take('OP', 1)
+  if (!ar || pu.length < 2 || ce.length < 2 || !op) return null
+  const [li] = take('LI', 1)
+  return {
+    lineup: { 1: ar.id, 2: pu[0].id, 3: ce[0].id, 4: op.id, 5: pu[1].id, 6: ce[1].id },
+    liberoId: li?.id ?? null,
+    liberoStart: li ? 6 : null,
+  }
 }
